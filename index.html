@@ -710,137 +710,228 @@
     <p>Safe space buat semua perasaan kamu. © 2025 Ruang Rasa.</p>
   </footer>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
-        // --- 2. TOGGLE FITUR (BUKA TUTUP MENU) ---
+    // --- 1. KONEKSI SUPABASE ---
+    // Menggunakan anon public key, bukan service_role key.
+    const SUPABASE_URL = "https://zifetztfqwarziqurhqx.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InppZmV0enRmcXdhcnppcXVyaHF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwMjg1NDksImV4cCI6MjA5NjYwNDU0OX0.sEq_ILun3_-JGIZRL3xSv1B1A0fWsCaZ2uuR9X9r1IA";
+    const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // --- 2. TOGGLE FITUR (BUKA TUTUP MENU) ---
     const toggleButtons = document.querySelectorAll('.toggle-fitur');
     const fiturContents = document.querySelectorAll('.fitur-content');
+
     toggleButtons.forEach(button => {
       button.addEventListener('click', function(e) {
-        e.preventDefault(); 
+        e.preventDefault();
         const targetId = this.getAttribute('data-target');
         const targetSection = document.getElementById(targetId);
-        
-        // Sembunyikan semuanya dulu
+
         fiturContents.forEach(content => content.classList.add('form-section-hidden'));
-        
-        // Munculkan yang di-klik
-        targetSection.classList.remove('form-section-hidden');
-        targetSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+        if (targetSection) {
+          targetSection.classList.remove('form-section-hidden');
+          targetSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
       });
     });
 
     // --- 3. MOOD SELECTOR ---
     let selectedMood = '😊 Bahagia';
     const moodBtns = document.querySelectorAll('.mood-btn');
+
     moodBtns.forEach(btn => {
       btn.addEventListener('click', function() {
-        if(this.hasAttribute('onclick')) return;
+        if (this.hasAttribute('onclick')) return;
         moodBtns.forEach(b => b.classList.remove('active'));
         this.classList.add('active');
         selectedMood = this.getAttribute('data-mood');
       });
     });
 
-    // --- 4. FUNGSI WAKTU & MODERASI ---
+    // --- 4. FUNGSI WAKTU, KEAMANAN TEKS, DAN MODERASI ---
     function getWaktuSekarang() {
       const skr = new Date();
       return `${skr.getHours().toString().padStart(2, '0')}:${skr.getMinutes().toString().padStart(2, '0')}`;
     }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
     const forbiddenWords = ['bodoh', 'kasar', 'benci', 'mati', 'jelek', 'bangsat', 'anjing', 'babi'];
+
     function isSafe(text) {
       let safe = true;
-      forbiddenWords.forEach(word => { if(text.toLowerCase().includes(word)) safe = false; });
-      if(!safe) alert('⚠️ Oops! Sistem mendeteksi kata yang kurang pantas. Yuk jaga Safe Space kita!');
+      forbiddenWords.forEach(word => {
+        if (String(text).toLowerCase().includes(word)) safe = false;
+      });
+
+      if (!safe) {
+        alert('⚠️ Oops! Sistem mendeteksi kata yang kurang pantas. Yuk jaga Safe Space kita!');
+      }
+
       return safe;
     }
 
-    // --- 5. LOGIKA RUANG CERITA ---
+    // --- 5. LOGIKA RUANG CERITA DENGAN SUPABASE ---
     const inputCerita = document.getElementById('inputCerita');
     const feedCerita = document.getElementById('feedCerita');
-    function loadCerita() {
-      const data = JSON.parse(localStorage.getItem('ruangRasaCerita')) || [];
-      feedCerita.innerHTML = data.length === 0 ? '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Belum ada cerita. Jadilah yang pertama! 🌸</p>' : '';
+
+    async function loadCerita() {
+      const { data, error } = await supabaseClient
+        .from('cerita')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Gagal memuat cerita:', error);
+        feedCerita.innerHTML = '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Gagal memuat cerita. Periksa koneksi Supabase dan policy RLS.</p>';
+        return;
+      }
+
+      feedCerita.innerHTML = data.length === 0
+        ? '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Belum ada cerita. Jadilah yang pertama! 🌸</p>'
+        : '';
+
       data.forEach(item => {
-        feedCerita.innerHTML += `<div class="curhat-item"><p>"${item.teks}"</p><span class="waktu">👤 Anonim • Merasa ${item.mood || '😊 Bahagia'} • ${item.waktu}</span></div>`;
+        feedCerita.innerHTML += `
+          <div class="curhat-item">
+            <p>"${escapeHtml(item.teks)}"</p>
+            <span class="waktu">
+              👤 Anonim • Merasa ${escapeHtml(item.mood || '😊 Bahagia')} • ${escapeHtml(item.waktu || '')}
+            </span>
+          </div>`;
       });
     }
-    document.getElementById('btnKirimCerita')?.addEventListener('click', () => {
+
+    document.getElementById('btnKirimCerita')?.addEventListener('click', async () => {
       const teks = inputCerita.value.trim();
+
       if (teks === '') return alert('Tulis ceritamu dulu ya!');
       if (!isSafe(teks)) return;
-      const data = JSON.parse(localStorage.getItem('ruangRasaCerita')) || [];
-      data.unshift({ teks, waktu: getWaktuSekarang(), mood: selectedMood });
-      localStorage.setItem('ruangRasaCerita', JSON.stringify(data));
-      inputCerita.value = ''; loadCerita(); 
+
+      const { error } = await supabaseClient
+        .from('cerita')
+        .insert({
+          teks: teks,
+          mood: selectedMood,
+          waktu: getWaktuSekarang()
+        });
+
+      if (error) {
+        console.error('Gagal mengirim cerita:', error);
+        return alert('Cerita gagal dikirim. Periksa koneksi database Supabase.');
+      }
+
+      inputCerita.value = '';
+      await loadCerita();
+
       alert('Cerita berhasil dibagikan! ✨');
 
-      // Auto-pindah ke tab Jelajah Cerita
       fiturContents.forEach(content => content.classList.add('form-section-hidden'));
       document.getElementById('baca-cerita').classList.remove('form-section-hidden');
       document.getElementById('baca-cerita').scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
-    loadCerita();
 
-    // --- 6. LOGIKA KIRIM PESAN & MADING PUBLIK ---
+    // --- 6. LOGIKA KIRIM PESAN & MADING PUBLIK DENGAN SUPABASE ---
     const inputPesanTarget = document.getElementById('inputPesanTarget');
     const inputPesanIsi = document.getElementById('inputPesanIsi');
     const feedPesan = document.getElementById('feedPesan');
-    function loadPesan() {
-      const data = JSON.parse(localStorage.getItem('ruangRasaPesan')) || [];
-      feedPesan.innerHTML = data.length === 0 ? '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Belum ada pesan masuk di mading ini. 💌</p>' : '';
+
+    async function loadPesan() {
+      const { data, error } = await supabaseClient
+        .from('pesan')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Gagal memuat pesan:', error);
+        feedPesan.innerHTML = '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Gagal memuat pesan. Periksa koneksi Supabase dan policy RLS.</p>';
+        return;
+      }
+
+      feedPesan.innerHTML = data.length === 0
+        ? '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Belum ada pesan masuk di mading ini. 💌</p>'
+        : '';
+
       data.forEach(item => {
-        feedPesan.innerHTML += `<div class="curhat-item"><span class="target-pesan">Teruntuk: ${item.target}</span><p>"${item.isi}"</p><span class="waktu">🕒 ${item.waktu}</span></div>`;
+        feedPesan.innerHTML += `
+          <div class="curhat-item">
+            <span class="target-pesan">Teruntuk: ${escapeHtml(item.target)}</span>
+            <p>"${escapeHtml(item.isi)}"</p>
+            <span class="waktu">🕒 ${escapeHtml(item.waktu || '')}</span>
+          </div>`;
       });
     }
-    document.getElementById('btnKirimPesan')?.addEventListener('click', () => {
+
+    document.getElementById('btnKirimPesan')?.addEventListener('click', async () => {
       const target = inputPesanTarget.value.trim();
       const isi = inputPesanIsi.value.trim();
+
       if (target === '' || isi === '') return alert('Isi target dan pesannya dulu ya!');
-      if (!isSafe(target + " " + isi)) return;
-      const data = JSON.parse(localStorage.getItem('ruangRasaPesan')) || [];
-      data.unshift({ target, isi, waktu: getWaktuSekarang() });
-      localStorage.setItem('ruangRasaPesan', JSON.stringify(data));
-      inputPesanTarget.value = ''; inputPesanIsi.value = ''; loadPesan(); 
+      if (!isSafe(target + ' ' + isi)) return;
+
+      const { error } = await supabaseClient
+        .from('pesan')
+        .insert({
+          target: target,
+          isi: isi,
+          waktu: getWaktuSekarang()
+        });
+
+      if (error) {
+        console.error('Gagal mengirim pesan:', error);
+        return alert('Pesan gagal dikirim. Periksa koneksi database Supabase.');
+      }
+
+      inputPesanTarget.value = '';
+      inputPesanIsi.value = '';
+      await loadPesan();
+
       alert('Pesan berhasil dipasang di Mading Publik! ✨');
-      
-      // Auto-pindah ke tab Mading Publik
+
       fiturContents.forEach(content => content.classList.add('form-section-hidden'));
       document.getElementById('mading-pesan').classList.remove('form-section-hidden');
       document.getElementById('mading-pesan').scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
-    loadPesan();
 
-    // --- 7. LOGIKA KIRIM LAGU DENGAN SEARCH ENGINE + AUDIO PLAYER LOKAL ---
+    // --- 7. LOGIKA KIRIM LAGU DENGAN SUPABASE ---
     const inputLaguTarget = document.getElementById('inputLaguTarget');
     const inputLaguPesan = document.getElementById('inputLaguPesan');
     const feedLagu = document.getElementById('feedLagu');
-    
-    // Elemen Pencarian
+
     const areaPencarianLagu = document.getElementById('areaPencarianLagu');
     const inputCariLagu = document.getElementById('inputCariLagu');
     const dropdownLagu = document.getElementById('hasilPencarianLagu');
     const boxLaguTerpilih = document.getElementById('laguTerpilihBox');
     const teksLaguTerpilih = document.getElementById('teksLaguTerpilih');
     const btnBatalLagu = document.getElementById('btnHapusPilihanLagu');
+
     let dataLaguYangDipilih = null;
 
-    // Database Simulasi Menggunakan File Audio Lokal
-    // Catatan: taruh file .mp3 legal di folder "audio" dengan nama sesuai properti audio di bawah.
+    // Database Simulasi Pilihan Lagu
+    // Fitur pemutar audio belum diaktifkan. Data lagu hanya disimpan sebagai dedikasi.
     const databaseLaguHits = [
-      { judul: "Cruel Summer", artis: "Taylor Swift", audio: "audio/cruel-summer.mp3" },
-      { judul: "Love Story", artis: "Taylor Swift", audio: "audio/love-story.mp3" },
-      { judul: "You're On Your Own, Kid", artis: "Taylor Swift", audio: "audio/youre-on-your-own-kid.mp3" },
-      { judul: "August", artis: "Taylor Swift", audio: "audio/august.mp3" },
-      { judul: "Cardigan", artis: "Taylor Swift", audio: "audio/cardigan.mp3" },
-      { judul: "Exile", artis: "Taylor Swift feat. Bon Iver", audio: "audio/exile.mp3" },
-      { judul: "Mirrorball", artis: "Taylor Swift", audio: "audio/mirrorball.mp3" },
-      { judul: "The Fate of Ophelia", artis: "Taylor Swift", audio: "audio/the-fate-of-ophelia.mp3" },
-      { judul: "Opalite", artis: "Taylor Swift", audio: "audio/opalite.mp3" },
-      { judul: "Blank Space", artis: "Taylor Swift", audio: "audio/blank-space.mp3" }
+      { judul: 'Cruel Summer', artis: 'Taylor Swift' },
+      { judul: 'Love Story', artis: 'Taylor Swift' },
+      { judul: "You're On Your Own, Kid", artis: 'Taylor Swift' },
+      { judul: 'August', artis: 'Taylor Swift' },
+      { judul: 'Cardigan', artis: 'Taylor Swift' },
+      { judul: 'Exile', artis: 'Taylor Swift feat. Bon Iver' },
+      { judul: 'Mirrorball', artis: 'Taylor Swift' },
+      { judul: 'The Fate of Ophelia', artis: 'Taylor Swift' },
+      { judul: 'Opalite', artis: 'Taylor Swift' },
+      { judul: 'Blank Space', artis: 'Taylor Swift' }
     ];
 
-    // Fungsi Saat Mengetik di Kolom Pencarian
-    inputCariLagu.addEventListener('input', function() {
+    inputCariLagu?.addEventListener('input', function() {
       const keyword = this.value.toLowerCase().trim();
       dropdownLagu.innerHTML = '';
 
@@ -849,39 +940,37 @@
         return;
       }
 
-      // Filter lagu berdasarkan judul atau artis
-      const hasilPencarian = databaseLaguHits.filter(lagu => 
-        lagu.judul.toLowerCase().includes(keyword) || 
+      const hasilPencarian = databaseLaguHits.filter(lagu =>
+        lagu.judul.toLowerCase().includes(keyword) ||
         lagu.artis.toLowerCase().includes(keyword)
       );
 
       if (hasilPencarian.length > 0) {
         dropdownLagu.classList.remove('form-section-hidden');
+
         hasilPencarian.forEach(lagu => {
           const item = document.createElement('div');
           item.className = 'search-item';
-          item.innerHTML = `<strong>${lagu.judul}</strong><span>${lagu.artis}</span>`;
-          
-          // Aksi Saat Lagu Diklik
+          item.innerHTML = `<strong>${escapeHtml(lagu.judul)}</strong><span>${escapeHtml(lagu.artis)}</span>`;
+
           item.addEventListener('click', () => {
-            dataLaguYangDipilih = lagu; // Simpan data lagu
-            areaPencarianLagu.style.display = 'none'; // Sembunyikan bar pencarian
+            dataLaguYangDipilih = lagu;
+            areaPencarianLagu.style.display = 'none';
             dropdownLagu.classList.add('form-section-hidden');
-            
-            boxLaguTerpilih.classList.remove('form-section-hidden'); // Tampilkan kotak pilihan
-            teksLaguTerpilih.innerHTML = `🎵 <strong>${lagu.judul}</strong> - ${lagu.artis}`;
+
+            boxLaguTerpilih.classList.remove('form-section-hidden');
+            teksLaguTerpilih.innerHTML = `🎵 <strong>${escapeHtml(lagu.judul)}</strong> - ${escapeHtml(lagu.artis)}`;
           });
-          
+
           dropdownLagu.appendChild(item);
         });
       } else {
         dropdownLagu.classList.remove('form-section-hidden');
-        dropdownLagu.innerHTML = `<div style="padding:15px; color:var(--text-soft); font-size:0.85rem; text-align:center;">Lagu belum tersedia di simulasi. Coba judul: "Cruel Summer", "Love Story", atau "Blank Space".</div>`;
+        dropdownLagu.innerHTML = '<div style="padding:15px; color:var(--text-soft); font-size:0.85rem; text-align:center;">Lagu belum tersedia di simulasi. Coba judul: "Cruel Summer", "Love Story", atau "Blank Space".</div>';
       }
     });
 
-    // Fungsi Tombol Batal/Ganti Lagu
-    btnBatalLagu.addEventListener('click', (e) => {
+    btnBatalLagu?.addEventListener('click', (e) => {
       e.preventDefault();
       dataLaguYangDipilih = null;
       boxLaguTerpilih.classList.add('form-section-hidden');
@@ -890,9 +979,7 @@
       inputCariLagu.focus();
     });
 
-    // Fungsi membuat kartu lagu nonaktif sementara.
-    // Tombol putar tidak menjalankan audio, melainkan menampilkan pemberitahuan fitur belum tersedia.
-    function getAudioPlayer(item, index) {
+    function getAudioPlayer(item) {
       const judul = item.judul || 'Lagu pilihan';
       const artis = item.artis || 'Radio Rasa';
 
@@ -901,8 +988,8 @@
           <div class="music-player-top">
             <div class="music-cover">🎵</div>
             <div class="music-info">
-              <strong>${judul}</strong>
-              <span>${artis}</span>
+              <strong>${escapeHtml(judul)}</strong>
+              <span>${escapeHtml(artis)}</span>
             </div>
             <button class="music-play-btn" type="button" onclick="tampilkanPesanFiturLagu(this)" aria-label="Putar lagu">▶</button>
           </div>
@@ -922,58 +1009,79 @@
       button.setAttribute('aria-label', 'Fitur lagu belum tersedia');
     }
 
-    function loadLagu() {
-      const data = JSON.parse(localStorage.getItem('ruangRasaLagu')) || [];
-      feedLagu.innerHTML = data.length === 0 ? '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Belum ada lagu yang dikirim hari ini. 🎵</p>' : '';
-      data.forEach((item, index) => {
-        const playerHtml = getAudioPlayer(item, index);
+    async function loadLagu() {
+      const { data, error } = await supabaseClient
+        .from('lagu')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Gagal memuat lagu:', error);
+        feedLagu.innerHTML = '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Gagal memuat playlist. Periksa koneksi Supabase dan policy RLS.</p>';
+        return;
+      }
+
+      feedLagu.innerHTML = data.length === 0
+        ? '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Belum ada lagu yang dikirim hari ini. 🎵</p>'
+        : '';
+
+      data.forEach(item => {
+        const playerHtml = getAudioPlayer(item);
+
         feedLagu.innerHTML += `
           <div class="curhat-item">
-            <span class="target-pesan">Untuk: ${item.target}</span>
-            <p>${item.pesan ? `"${item.pesan}"` : `<em>(Tanpa pesan)</em>`}</p>
+            <span class="target-pesan">Untuk: ${escapeHtml(item.target)}</span>
+            <p>${item.pesan ? `"${escapeHtml(item.pesan)}"` : '<em>(Tanpa pesan)</em>'}</p>
             ${playerHtml}
-            <div class="waktu" style="margin-top: 12px; font-size: 0.75rem; color: var(--text-soft);">🕒 ${item.waktu}</div>
+            <div class="waktu" style="margin-top: 12px; font-size: 0.75rem; color: var(--text-soft);">
+              🕒 ${escapeHtml(item.waktu || '')}
+            </div>
           </div>`;
       });
     }
 
-    // Aksi Tombol Kirim Lagu
-    document.getElementById('btnKirimLagu')?.addEventListener('click', () => {
+    document.getElementById('btnKirimLagu')?.addEventListener('click', async () => {
       const target = inputLaguTarget.value.trim();
       const pesan = inputLaguPesan.value.trim();
-      
+
       if (target === '') return alert('Isi target penerimanya dulu ya!');
       if (!dataLaguYangDipilih) return alert('Kamu belum memilih lagu! Ketik judulnya di kolom pencarian.');
-      if (!isSafe(target + " " + pesan)) return;
-      
-      const data = JSON.parse(localStorage.getItem('ruangRasaLagu')) || [];
-      // Simpan data dari lagu yang dipilih via search
-      data.unshift({
-        target: target,
-        judul: dataLaguYangDipilih.judul,
-        artis: dataLaguYangDipilih.artis,
-        audio: dataLaguYangDipilih.audio,
-        pesan: pesan,
-        waktu: getWaktuSekarang()
-      });
-      localStorage.setItem('ruangRasaLagu', JSON.stringify(data));
-      
-      // Reset Form
-      inputLaguTarget.value = ''; inputLaguPesan.value = '';
+      if (!isSafe(target + ' ' + pesan)) return;
+
+      const { error } = await supabaseClient
+        .from('lagu')
+        .insert({
+          target: target,
+          judul: dataLaguYangDipilih.judul,
+          artis: dataLaguYangDipilih.artis,
+          pesan: pesan,
+          waktu: getWaktuSekarang()
+        });
+
+      if (error) {
+        console.error('Gagal mengirim lagu:', error);
+        return alert('Lagu gagal dikirim. Periksa koneksi database Supabase.');
+      }
+
+      inputLaguTarget.value = '';
+      inputLaguPesan.value = '';
       dataLaguYangDipilih = null;
       boxLaguTerpilih.classList.add('form-section-hidden');
       areaPencarianLagu.style.display = 'block';
       inputCariLagu.value = '';
-      
-      loadLagu(); 
+
+      await loadLagu();
+
       alert('Dedikasi lagu berhasil ditambahkan ke Radio Rasa! 🎵');
-      
-      // Auto-pindah ke tab Radio Rasa
+
       fiturContents.forEach(content => content.classList.add('form-section-hidden'));
       document.getElementById('radio-rasa').classList.remove('form-section-hidden');
       document.getElementById('radio-rasa').scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
-    
+
+    // --- 8. MUAT DATA AWAL DARI SUPABASE ---
+    loadCerita();
+    loadPesan();
     loadLagu();
   </script>
 </body>
