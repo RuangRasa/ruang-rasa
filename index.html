@@ -262,6 +262,51 @@
     .premium-btn-outline:hover { background: rgba(245, 166, 35, 0.05); transform: translateY(-2px); }
 
     .feed-container { display: flex; flex-direction: column; gap: 20px; max-width: 600px; margin: 20px auto 0; text-align: left; }
+
+    /* ===========================
+       PAGINATION FEED
+       Menampilkan 5 item per halaman pada Jelajah Cerita, Mading Publik, dan Radio Rasa.
+    =========================== */
+    .pagination-controls {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      max-width: 600px;
+      margin: 22px auto 0;
+    }
+    .pagination-btn {
+      background: var(--white);
+      border: 1px solid var(--pink-light);
+      color: var(--pink-deep);
+      padding: 9px 16px;
+      border-radius: 50px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .pagination-btn:hover:not(:disabled) {
+      background: var(--pink-deep);
+      color: var(--white);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 18px rgba(194, 72, 106, 0.18);
+    }
+    .pagination-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .pagination-info {
+      color: var(--text-soft);
+      font-size: 0.82rem;
+      font-weight: 500;
+      background: var(--pink-pale);
+      border: 1px solid var(--pink-light);
+      padding: 8px 14px;
+      border-radius: 50px;
+    }
     .curhat-item { background: var(--white); padding: 20px; border-left: 5px solid var(--pink-mid); border-radius: 12px; box-shadow: 0 5px 15px rgba(194, 72, 106, 0.05); }
     .curhat-item p { color: var(--text); font-size: 0.95rem; margin-bottom: 10px; line-height: 1.6; }
     .curhat-item .waktu { font-size: 0.75rem; color: var(--text-soft); }
@@ -459,6 +504,8 @@
       .blob-1 { width: 260px; height: 260px; }
       .blob-2 { display: none; }
       .nav-buttons { flex-direction: column; gap: 5px; }
+      .pagination-controls { gap: 8px; }
+      .pagination-btn, .pagination-info { font-size: 0.76rem; padding: 8px 12px; }
     }
   </style>
 </head>
@@ -658,6 +705,7 @@
       <p class="body-text" style="margin: 0 auto 30px;">Baca keluh kesah dan pengalaman anonim dari teman-teman lain hari ini.</p>
       
       <div id="feedCerita" class="feed-container"></div>
+      <div id="paginationCerita" class="pagination-controls"></div>
     </div>
   </section>
 
@@ -668,6 +716,7 @@
       <p class="body-text" style="margin: 0 auto 30px;">Baca pesan-pesan rahasia yang belum terucap dari teman-teman lain di sini.</p>
       
       <div id="feedPesan" class="feed-container"></div>
+      <div id="paginationPesan" class="pagination-controls"></div>
     </div>
   </section>
 
@@ -678,6 +727,7 @@
       <p class="body-text" style="margin: 0 auto 30px;">Dengarkan lagu-lagu dedikasi yang dikirimkan secara anonim dari teman-teman lain di sini.</p>
       
       <div id="feedLagu" class="feed-container"></div>
+      <div id="paginationLagu" class="pagination-controls"></div>
     </div>
   </section>
 
@@ -780,9 +830,79 @@
       return safe;
     }
 
+
+    // --- 5. PENGATURAN PAGINATION FEED ---
+    const JUMLAH_ITEM_PER_HALAMAN = 5;
+
+    function renderPagination(container, totalData, halamanAktif, onPilihHalaman) {
+      if (!container) return;
+
+      const totalHalaman = Math.ceil(totalData / JUMLAH_ITEM_PER_HALAMAN);
+
+      if (totalHalaman <= 1) {
+        container.innerHTML = '';
+        return;
+      }
+
+      container.innerHTML = `
+        <button class="pagination-btn pagination-prev" type="button" ${halamanAktif === 1 ? 'disabled' : ''}>← Sebelumnya</button>
+        <span class="pagination-info">Halaman ${halamanAktif} dari ${totalHalaman}</span>
+        <button class="pagination-btn pagination-next" type="button" ${halamanAktif === totalHalaman ? 'disabled' : ''}>Selanjutnya →</button>
+      `;
+
+      container.querySelector('.pagination-prev')?.addEventListener('click', () => {
+        if (halamanAktif > 1) onPilihHalaman(halamanAktif - 1);
+      });
+
+      container.querySelector('.pagination-next')?.addEventListener('click', () => {
+        if (halamanAktif < totalHalaman) onPilihHalaman(halamanAktif + 1);
+      });
+    }
+
+    function ambilDataHalaman(data, halamanAktif) {
+      const mulai = (halamanAktif - 1) * JUMLAH_ITEM_PER_HALAMAN;
+      const akhir = mulai + JUMLAH_ITEM_PER_HALAMAN;
+      return data.slice(mulai, akhir);
+    }
+
     // --- 5. LOGIKA RUANG CERITA DENGAN SUPABASE ---
     const inputCerita = document.getElementById('inputCerita');
     const feedCerita = document.getElementById('feedCerita');
+
+    let dataCeritaCache = [];
+    let halamanCerita = 1;
+    const paginationCerita = document.getElementById('paginationCerita');
+
+    function renderCerita() {
+      if (dataCeritaCache.length === 0) {
+        feedCerita.innerHTML = '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Belum ada cerita. Jadilah yang pertama! 🌸</p>';
+        if (paginationCerita) paginationCerita.innerHTML = '';
+        return;
+      }
+
+      const totalHalaman = Math.max(1, Math.ceil(dataCeritaCache.length / JUMLAH_ITEM_PER_HALAMAN));
+      if (halamanCerita > totalHalaman) halamanCerita = totalHalaman;
+      if (halamanCerita < 1) halamanCerita = 1;
+
+      const dataHalaman = ambilDataHalaman(dataCeritaCache, halamanCerita);
+      feedCerita.innerHTML = '';
+
+      dataHalaman.forEach(item => {
+        feedCerita.innerHTML += `
+          <div class="curhat-item">
+            <p>"${escapeHtml(item.teks)}"</p>
+            <span class="waktu">
+              👤 Anonim • Merasa ${escapeHtml(item.mood || '😊 Bahagia')} • ${escapeHtml(item.waktu || '')}
+            </span>
+          </div>`;
+      });
+
+      renderPagination(paginationCerita, dataCeritaCache.length, halamanCerita, (halamanBaru) => {
+        halamanCerita = halamanBaru;
+        renderCerita();
+        feedCerita.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    }
 
     async function loadCerita() {
       const { data, error } = await supabaseClient
@@ -793,22 +913,12 @@
       if (error) {
         console.error('Gagal memuat cerita:', error);
         feedCerita.innerHTML = '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Gagal memuat cerita. Periksa koneksi Supabase dan policy RLS.</p>';
+        if (paginationCerita) paginationCerita.innerHTML = '';
         return;
       }
 
-      feedCerita.innerHTML = data.length === 0
-        ? '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Belum ada cerita. Jadilah yang pertama! 🌸</p>'
-        : '';
-
-      data.forEach(item => {
-        feedCerita.innerHTML += `
-          <div class="curhat-item">
-            <p>"${escapeHtml(item.teks)}"</p>
-            <span class="waktu">
-              👤 Anonim • Merasa ${escapeHtml(item.mood || '😊 Bahagia')} • ${escapeHtml(item.waktu || '')}
-            </span>
-          </div>`;
-      });
+      dataCeritaCache = data || [];
+      renderCerita();
     }
 
     document.getElementById('btnKirimCerita')?.addEventListener('click', async () => {
@@ -831,6 +941,7 @@
       }
 
       inputCerita.value = '';
+      halamanCerita = 1;
       await loadCerita();
 
       alert('Cerita berhasil dibagikan! ✨');
@@ -845,6 +956,40 @@
     const inputPesanIsi = document.getElementById('inputPesanIsi');
     const feedPesan = document.getElementById('feedPesan');
 
+    let dataPesanCache = [];
+    let halamanPesan = 1;
+    const paginationPesan = document.getElementById('paginationPesan');
+
+    function renderPesan() {
+      if (dataPesanCache.length === 0) {
+        feedPesan.innerHTML = '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Belum ada pesan masuk di mading ini. 💌</p>';
+        if (paginationPesan) paginationPesan.innerHTML = '';
+        return;
+      }
+
+      const totalHalaman = Math.max(1, Math.ceil(dataPesanCache.length / JUMLAH_ITEM_PER_HALAMAN));
+      if (halamanPesan > totalHalaman) halamanPesan = totalHalaman;
+      if (halamanPesan < 1) halamanPesan = 1;
+
+      const dataHalaman = ambilDataHalaman(dataPesanCache, halamanPesan);
+      feedPesan.innerHTML = '';
+
+      dataHalaman.forEach(item => {
+        feedPesan.innerHTML += `
+          <div class="curhat-item">
+            <span class="target-pesan">Teruntuk: ${escapeHtml(item.target)}</span>
+            <p>"${escapeHtml(item.isi)}"</p>
+            <span class="waktu">🕒 ${escapeHtml(item.waktu || '')}</span>
+          </div>`;
+      });
+
+      renderPagination(paginationPesan, dataPesanCache.length, halamanPesan, (halamanBaru) => {
+        halamanPesan = halamanBaru;
+        renderPesan();
+        feedPesan.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    }
+
     async function loadPesan() {
       const { data, error } = await supabaseClient
         .from('pesan')
@@ -854,21 +999,12 @@
       if (error) {
         console.error('Gagal memuat pesan:', error);
         feedPesan.innerHTML = '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Gagal memuat pesan. Periksa koneksi Supabase dan policy RLS.</p>';
+        if (paginationPesan) paginationPesan.innerHTML = '';
         return;
       }
 
-      feedPesan.innerHTML = data.length === 0
-        ? '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Belum ada pesan masuk di mading ini. 💌</p>'
-        : '';
-
-      data.forEach(item => {
-        feedPesan.innerHTML += `
-          <div class="curhat-item">
-            <span class="target-pesan">Teruntuk: ${escapeHtml(item.target)}</span>
-            <p>"${escapeHtml(item.isi)}"</p>
-            <span class="waktu">🕒 ${escapeHtml(item.waktu || '')}</span>
-          </div>`;
-      });
+      dataPesanCache = data || [];
+      renderPesan();
     }
 
     document.getElementById('btnKirimPesan')?.addEventListener('click', async () => {
@@ -893,6 +1029,7 @@
 
       inputPesanTarget.value = '';
       inputPesanIsi.value = '';
+      halamanPesan = 1;
       await loadPesan();
 
       alert('Pesan berhasil dipasang di Mading Publik! ✨');
@@ -1009,23 +1146,25 @@
       button.setAttribute('aria-label', 'Fitur lagu belum tersedia');
     }
 
-    async function loadLagu() {
-      const { data, error } = await supabaseClient
-        .from('lagu')
-        .select('*')
-        .order('created_at', { ascending: false });
+    let dataLaguCache = [];
+    let halamanLagu = 1;
+    const paginationLagu = document.getElementById('paginationLagu');
 
-      if (error) {
-        console.error('Gagal memuat lagu:', error);
-        feedLagu.innerHTML = '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Gagal memuat playlist. Periksa koneksi Supabase dan policy RLS.</p>';
+    function renderLagu() {
+      if (dataLaguCache.length === 0) {
+        feedLagu.innerHTML = '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Belum ada lagu yang dikirim hari ini. 🎵</p>';
+        if (paginationLagu) paginationLagu.innerHTML = '';
         return;
       }
 
-      feedLagu.innerHTML = data.length === 0
-        ? '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Belum ada lagu yang dikirim hari ini. 🎵</p>'
-        : '';
+      const totalHalaman = Math.max(1, Math.ceil(dataLaguCache.length / JUMLAH_ITEM_PER_HALAMAN));
+      if (halamanLagu > totalHalaman) halamanLagu = totalHalaman;
+      if (halamanLagu < 1) halamanLagu = 1;
 
-      data.forEach(item => {
+      const dataHalaman = ambilDataHalaman(dataLaguCache, halamanLagu);
+      feedLagu.innerHTML = '';
+
+      dataHalaman.forEach(item => {
         const playerHtml = getAudioPlayer(item);
 
         feedLagu.innerHTML += `
@@ -1038,6 +1177,29 @@
             </div>
           </div>`;
       });
+
+      renderPagination(paginationLagu, dataLaguCache.length, halamanLagu, (halamanBaru) => {
+        halamanLagu = halamanBaru;
+        renderLagu();
+        feedLagu.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    }
+
+    async function loadLagu() {
+      const { data, error } = await supabaseClient
+        .from('lagu')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Gagal memuat lagu:', error);
+        feedLagu.innerHTML = '<p style="text-align:center; color: var(--text-soft); font-size: 0.9rem;">Gagal memuat playlist. Periksa koneksi Supabase dan policy RLS.</p>';
+        if (paginationLagu) paginationLagu.innerHTML = '';
+        return;
+      }
+
+      dataLaguCache = data || [];
+      renderLagu();
     }
 
     document.getElementById('btnKirimLagu')?.addEventListener('click', async () => {
@@ -1070,6 +1232,7 @@
       areaPencarianLagu.style.display = 'block';
       inputCariLagu.value = '';
 
+      halamanLagu = 1;
       await loadLagu();
 
       alert('Dedikasi lagu berhasil ditambahkan ke Radio Rasa! 🎵');
